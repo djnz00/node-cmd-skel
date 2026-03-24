@@ -1,0 +1,56 @@
+{
+  "name": "node-cmd-skel",
+  "version": "0.0.1",
+  "description": "Reusable skeleton for standalone Node.js command-line tools",
+  "type": "module",
+  "bin": {
+    "node-cmd-skel": "./node-cmd-skel"
+  },
+  "main": "./lib/index.js",
+  "exports": "./lib/index.js",
+  "files": [
+    "LICENSE",
+    "README.md",
+    "node-cmd-skel",
+    "lib"
+  ],
+  "homepage": "https://github.com/djnz00/node-cmd-skel#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/djnz00/node-cmd-skel.git"
+  },
+  "bugs": {
+    "url": "https://github.com/djnz00/node-cmd-skel/issues"
+  },
+  "scripts": {
+    "bump": "./scripts/bump",
+    "dist": "node scripts/build-dist.mjs",
+    "release:assets": "node scripts/build-release-assets.mjs",
+    "release:verify": "node scripts/build-release-candidate.mjs",
+    "render:formula": "node scripts/render-homebrew-formula.mjs",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "cli",
+    "node",
+    "skeleton",
+    "template"
+  ],
+  "engines": {
+    "node": ">=24"
+  },
+  "license": "MIT",
+  "packageManager": "pnpm@10.26.2",
+  "publishConfig": {
+    "access": "public"
+  },
+  "dependencies": {
+    "commander": "^13.1.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3",
+    "postject": "1.0.0-alpha.6",
+    "vitest": "^3.2.4"
+  }
+}

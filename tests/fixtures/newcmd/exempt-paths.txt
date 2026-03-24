@@ -1,0 +1,12 @@
+goal.md
+develop_requirements.md
+iterate_requirements.md
+requirements.md
+requirements.new.md
+develop_plan.md
+iterate_plan.md
+plan.md
+plan.new.md
+implement_plan.md
+iterate_implementation.md
+scripts/newcmd

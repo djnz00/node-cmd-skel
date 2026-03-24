@@ -1,0 +1,307 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - '*.md'
+      - 'docs/**'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      formula_file: ${{ steps.meta.outputs.formula_file }}
+      package_name: ${{ steps.meta.outputs.package_name }}
+      should_release: ${{ steps.check.outputs.should_release }}
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '25.8.1'
+          package-manager-cache: false
+
+      - name: Resolve package metadata
+        id: meta
+        run: |
+          version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          package_name="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).name")"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "package_name=${package_name}" >> "$GITHUB_OUTPUT"
+          echo "formula_file=${package_name}.rb" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether this version is already released
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.meta.outputs.tag }}
+        run: |
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  verify-release:
+    needs: resolve-release
+    if: ${{ needs.resolve-release.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '25.8.1'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Update Corepack
+        run: npm install --global corepack@latest
+
+      - name: Enable Corepack
+        run: corepack enable pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run test suite
+        run: make test
+
+  build-platform-binaries:
+    needs: resolve-release
+    if: ${{ needs.resolve-release.outputs.should_release == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            target: linux-x64
+          - runner: macos-15-intel
+            target: macos-x64
+          - runner: macos-15
+            target: macos-arm64
+    runs-on: ${{ matrix.runner }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '25.8.1'
+          package-manager-cache: false
+
+      - name: Update Corepack
+        run: npm install --global corepack@latest
+
+      - name: Enable Corepack
+        run: corepack enable pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Resolve package metadata
+        id: meta
+        run: |
+          package_name="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).name")"
+          echo "package_name=${package_name}" >> "$GITHUB_OUTPUT"
+
+      - name: Build platform executable
+        run: make dist DIST_TARGETS=${{ matrix.target }}
+
+      - name: Ad-hoc sign macOS executable
+        if: ${{ startsWith(matrix.target, 'macos-') }}
+        run: codesign --force --sign - releases/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}
+
+      - name: Verify macOS signature
+        if: ${{ startsWith(matrix.target, 'macos-') }}
+        run: codesign --verify --verbose=4 releases/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}
+
+      - name: Smoke test raw executable
+        id: smoke_raw
+        continue-on-error: true
+        run: ./releases/${{ steps.meta.outputs.package_name }}-${{ matrix.target }} --help
+
+      - name: Smoke test packaged executable
+        id: smoke_packaged
+        continue-on-error: true
+        run: |
+          rm -rf dist/smoke-test
+          mkdir -p dist/smoke-test/archive dist/smoke-test/extract
+          cp releases/${{ steps.meta.outputs.package_name }}-${{ matrix.target }} dist/smoke-test/archive/${{ steps.meta.outputs.package_name }}
+          tar -C dist/smoke-test/archive -czf dist/smoke-test/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}.tar.gz ${{ steps.meta.outputs.package_name }}
+          tar -C dist/smoke-test/extract -xzf dist/smoke-test/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}.tar.gz
+          ./dist/smoke-test/extract/${{ steps.meta.outputs.package_name }} --help
+
+      - name: Enforce smoke tests
+        if: ${{ steps.smoke_raw.conclusion != 'success' || steps.smoke_packaged.conclusion != 'success' }}
+        run: |
+          echo "Raw executable smoke test: ${{ steps.smoke_raw.conclusion }}"
+          echo "Packaged executable smoke test: ${{ steps.smoke_packaged.conclusion }}"
+          exit 1
+
+      - name: Package executable artifact for release assembly
+        run: |
+          mkdir -p dist/workflow-artifacts
+          tar -C releases -cf dist/workflow-artifacts/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}.tar ${{ steps.meta.outputs.package_name }}-${{ matrix.target }}
+
+      - name: Upload executable artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: executable-${{ matrix.target }}
+          if-no-files-found: error
+          path: dist/workflow-artifacts/${{ steps.meta.outputs.package_name }}-${{ matrix.target }}.tar
+
+  package-release:
+    needs:
+      - resolve-release
+      - verify-release
+      - build-platform-binaries
+    if: ${{ needs.resolve-release.outputs.should_release == 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '25.8.1'
+          registry-url: 'https://registry.npmjs.org'
+          package-manager-cache: false
+
+      - name: Download platform executables
+        uses: actions/download-artifact@v8
+        with:
+          pattern: executable-*
+          merge-multiple: true
+          path: dist/workflow-artifacts
+
+      - name: Rehydrate signed release executables
+        run: |
+          rm -rf dist/release-assets dist/npm dist/homebrew
+          mkdir -p releases
+          for archive in dist/workflow-artifacts/*.tar; do
+            tar -C releases -xf "$archive"
+          done
+          chmod 0755 releases/${{ needs.resolve-release.outputs.package_name }}-*
+
+      - name: Verify release executables are present
+        run: |
+          test -x releases/${{ needs.resolve-release.outputs.package_name }}-linux-x64
+          test -x releases/${{ needs.resolve-release.outputs.package_name }}-macos-x64
+          test -x releases/${{ needs.resolve-release.outputs.package_name }}-macos-arm64
+          ./releases/${{ needs.resolve-release.outputs.package_name }}-linux-x64 --help
+
+      - name: Build release metadata and archives
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: node scripts/build-release-assets.mjs
+
+      - name: Build npm package and Homebrew formula
+        env:
+          RELEASE_REPO: ${{ github.repository }}
+        run: |
+          mkdir -p dist/npm dist/homebrew
+          npm pack --pack-destination dist/npm
+          node scripts/render-homebrew-formula.mjs \
+            --manifest dist/release-assets/release-manifest.json \
+            --repo "${RELEASE_REPO}" \
+            --license "$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).license")" \
+            > dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+
+      - name: Validate packaged release outputs
+        env:
+          RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+        run: |
+          test -f dist/release-assets/${{ needs.resolve-release.outputs.package_name }}-linux-x64.tar.gz
+          test -f dist/release-assets/${{ needs.resolve-release.outputs.package_name }}-macos-x64.tar.gz
+          test -f dist/release-assets/${{ needs.resolve-release.outputs.package_name }}-macos-arm64.tar.gz
+          test -f dist/release-assets/SHA256SUMS
+          test -f dist/release-assets/release-manifest.json
+          test -f dist/npm/${{ needs.resolve-release.outputs.package_name }}-${RELEASE_VERSION}.tgz
+          test -f dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+          grep -q '${{ needs.resolve-release.outputs.package_name }}-linux-x64.tar.gz' dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+          grep -q '${{ needs.resolve-release.outputs.package_name }}-macos-x64.tar.gz' dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+          grep -q '${{ needs.resolve-release.outputs.package_name }}-macos-arm64.tar.gz' dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+          grep -q "version \"${RELEASE_VERSION}\"" dist/homebrew/${{ needs.resolve-release.outputs.formula_file }}
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
+          gh release view "${RELEASE_TAG}" >/dev/null 2>&1 || \
+            gh release create "${RELEASE_TAG}" --target "${GITHUB_SHA}" --generate-notes
+
+          gh release upload "${RELEASE_TAG}" \
+            dist/release-assets/* \
+            dist/npm/*.tgz \
+            dist/homebrew/${{ needs.resolve-release.outputs.formula_file }} \
+            --clobber
+
+      - name: Publish package to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+        run: |
+          if [ -z "${NODE_AUTH_TOKEN}" ]; then
+            echo "::warning::NPM_TOKEN is not configured; skipping npm publish."
+            exit 0
+          fi
+
+          if npm view "${{ needs.resolve-release.outputs.package_name }}@${RELEASE_VERSION}" version >/dev/null 2>&1; then
+            echo "${{ needs.resolve-release.outputs.package_name }}@${RELEASE_VERSION} is already published to npm."
+            exit 0
+          fi
+
+          npm publish "dist/npm/${{ needs.resolve-release.outputs.package_name }}-${RELEASE_VERSION}.tgz" --access public
+
+      - name: Update Homebrew tap
+        env:
+          TAP_REPO: ${{ vars.HOMEBREW_TAP_REPO }}
+          TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
+          if [ -z "${TAP_REPO}" ] || [ -z "${TAP_TOKEN}" ]; then
+            echo "::warning::Homebrew tap sync is not configured; skipping tap update."
+            exit 0
+          fi
+
+          git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" tap
+          mkdir -p tap/Formula
+          cp dist/homebrew/${{ needs.resolve-release.outputs.formula_file }} tap/Formula/${{ needs.resolve-release.outputs.formula_file }}
+
+          cd tap
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          if git diff --quiet -- Formula/${{ needs.resolve-release.outputs.formula_file }}; then
+            echo "Formula already up to date."
+            exit 0
+          fi
+
+          git add Formula/${{ needs.resolve-release.outputs.formula_file }}
+          git commit -m "Update ${{ needs.resolve-release.outputs.package_name }} to ${RELEASE_TAG}"
+          git push
+
+  no-release:
+    needs: resolve-release
+    if: ${{ needs.resolve-release.outputs.should_release != 'true' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Explain skipped release
+        run: echo "package.json is still at ${{ needs.resolve-release.outputs.version }} and that version is already released."
