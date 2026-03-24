@@ -121,17 +121,19 @@ async function trackedNameMatches(repoDir, name) {
   if (trackedPaths.length === 0)
     return '';
 
-  try {
-    const { stdout: matches } = await execFile_('rg', ['-n', '--fixed-strings', name, ...trackedPaths], {
-      cwd: repoDir
-    });
-    return matches.trim();
-  } catch (error) {
-    if (error.code === 1)
-      return '';
+  const matches = [];
 
-    throw error;
+  for (const relativePath of trackedPaths) {
+    const contents = await readFile(path.join(repoDir, relativePath), 'utf8');
+    const lines = contents.split(/\r?\n/);
+
+    for (let index = 0; index < lines.length; index += 1) {
+      if (lines[index].includes(name))
+        matches.push(`${relativePath}:${index + 1}:${lines[index]}`);
+    }
   }
+
+  return matches.join('\n');
 }
 
 function runScript(command, args, { cwd, env, input }) {
