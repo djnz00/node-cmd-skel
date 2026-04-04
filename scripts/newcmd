@@ -3,9 +3,9 @@ set -euo pipefail
 
 old_name='node-cmd-skel'
 old_repo='djnz00/node-cmd-skel'
-old_tap_repo='djnz00/homebrew-node-cmd-skel'
-old_tap_short='djnz00/node-cmd-skel'
-old_tap_badge='djnz00%2Fnode--cmd--skel'
+old_tap_repo='djnz00/homebrew-djnz00'
+old_tap_short='djnz00/djnz00'
+old_tap_badge='djnz00%2Fdjnz00'
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/.." && pwd)"

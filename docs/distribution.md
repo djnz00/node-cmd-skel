@@ -63,8 +63,8 @@ The formula is generated from `dist/release-assets/release-manifest.json`, so th
 
 The base skeleton assumes:
 
-- shortened install syntax: `brew install djnz00/node-cmd-skel/node-cmd-skel`
-- tap repository: `djnz00/homebrew-node-cmd-skel`
+- shortened install syntax: `brew install djnz00/djnz00/node-cmd-skel`
+- tap repository: `djnz00/homebrew-djnz00`
 
 Derived repositories should update those values through `./scripts/newcmd`.
 

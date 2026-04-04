@@ -1,6 +1,6 @@
 [![CI](https://github.com/djnz00/node-cmd-skel/actions/workflows/ci.yml/badge.svg)](https://github.com/djnz00/node-cmd-skel/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/djnz00/node-cmd-skel?display_name=tag)](https://github.com/djnz00/node-cmd-skel/releases/latest)
-[![Homebrew](https://img.shields.io/badge/Homebrew-djnz00%2Fnode--cmd--skel-fbb040?logo=homebrew)](https://github.com/djnz00/homebrew-node-cmd-skel)
+[![Homebrew](https://img.shields.io/badge/Homebrew-djnz00%2Fdjnz00-fbb040?logo=homebrew)](https://github.com/djnz00/homebrew-djnz00)
 [![Node >=24](https://img.shields.io/badge/node-%3E%3D24-43853d?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![License](https://img.shields.io/github/license/djnz00/node-cmd-skel)](./LICENSE)
 
@@ -13,7 +13,7 @@
 Homebrew:
 
 ```bash
-brew install djnz00/node-cmd-skel/node-cmd-skel
+brew install djnz00/djnz00/node-cmd-skel
 ```
 
 npm tarball:
