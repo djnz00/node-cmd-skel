@@ -60,6 +60,9 @@ describe('scripts/newcmd', () => {
     expect(await readFile(path.join(repoDir, 'README.md'), 'utf8')).toContain(
       'https://github.com/acme/ship-it'
     );
+    expect(await readFile(path.join(repoDir, 'AGENTS.md'), 'utf8')).toContain(
+      '`ship-it` is a small Node.js CLI skeleton.'
+    );
     expect(await readFile(path.join(repoDir, 'docs', 'distribution.md'), 'utf8')).toContain(
       'acme/homebrew-tools'
     );
@@ -97,6 +100,9 @@ describe('scripts/newcmd', () => {
     );
     expect(await readFile(path.join(repoDir, 'docs', 'distribution.md'), 'utf8')).toContain(
       'acme/homebrew-tools'
+    );
+    expect(await readFile(path.join(repoDir, 'AGENTS.md'), 'utf8')).toContain(
+      '`ship-it` is a small Node.js CLI skeleton.'
     );
     expect(await readFile(path.join(repoDir, 'lib', 'project.js'), 'utf8')).toContain(
       "export const cliName = 'ship-it';"

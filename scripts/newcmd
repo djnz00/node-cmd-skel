@@ -200,6 +200,7 @@ EOF
 }
 
 known_files=(
+  AGENTS.md
   README.md
   docs/distribution.md
   lib/project.js
