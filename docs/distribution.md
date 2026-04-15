@@ -69,7 +69,7 @@ The base skeleton assumes:
 Derived repositories should update those values through `./scripts/newcmd`.
 
 <!-- NEWCMD:START -->
-## Clone-Time Rebranding
+## Skeleton Bootstrap
 
-`./scripts/newcmd` is only for the base skeleton and freshly cloned derivative repositories. It rewrites command/package/release naming from the repository basename and prompts for the shortened Homebrew tap name in `owner/tap` form. Unless `NEWCMD_TEST_HARNESS=1` is set, it can remove itself and its dedicated tests after a successful rename.
+`./scripts/newcmd` is primarily meant to run from the base `node-cmd-skel` checkout. It prompts for the new command name, uses `gh` to create a sibling GitHub repository, tar-copies the tracked skeleton files into that checkout, rewrites command/package/release naming there, and prompts for the shortened Homebrew tap name in `owner/tap` form. Unless `NEWCMD_TEST_HARNESS=1` is set, it can remove itself and its dedicated tests after a successful rename.
 <!-- NEWCMD:END -->

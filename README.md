@@ -73,13 +73,13 @@ The release pipeline can publish:
 Maintainer-facing distribution notes live in [`docs/distribution.md`](./docs/distribution.md).
 
 <!-- NEWCMD:START -->
-## Rebrand a Clone
+## Create a Derived Repo
 
-After cloning this skeleton into a new repository, rename it by setting the repository directory name first and then running:
+From the `node-cmd-skel` checkout itself, run:
 
 ```bash
 ./scripts/newcmd
 ```
 
-The script derives the new command name from the repository basename, rewrites package/runtime/docs/workflow naming, prompts for the Homebrew tap in `owner/tap` form, and can remove itself plus its dedicated tests once the clone has been rebranded successfully.
+The script prompts for the new command name, creates a sibling GitHub repository with `gh`, tar-copies the tracked skeleton files into that checkout, rewrites package/runtime/docs/workflow naming there, prompts for the Homebrew tap in `owner/tap` form, and can remove itself plus its dedicated tests once the new repo has been rebranded successfully.
 <!-- NEWCMD:END -->

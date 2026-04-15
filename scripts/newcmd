@@ -10,18 +10,96 @@ old_tap_badge='djnz00%2Fdjnz00'
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 root_dir="$(cd "${script_dir}/.." && pwd)"
 
+require_command() {
+  local command_name="$1"
+
+  if ! command -v "${command_name}" >/dev/null 2>&1; then
+    echo "scripts/newcmd requires '${command_name}' on PATH." >&2
+    exit 1
+  fi
+}
+
+validate_command_name() {
+  local command_name="$1"
+
+  if [[ -z "${command_name}" ]]; then
+    echo "Could not determine a command name." >&2
+    exit 1
+  fi
+
+  if [[ ! "${command_name}" =~ ^[a-z][a-z0-9-]*$ ]]; then
+    echo "Command name '${command_name}' contains unsupported characters." >&2
+    exit 1
+  fi
+}
+
+copy_template_repo() {
+  local source_dir="$1"
+  local target_dir="$2"
+  local manifest_path
+
+  manifest_path="$(mktemp)"
+  trap 'rm -f "${manifest_path}"' RETURN
+
+  (
+    cd "${source_dir}"
+    git ls-files > "${manifest_path}"
+    tar -cf - -T "${manifest_path}"
+  ) | (
+    cd "${target_dir}"
+    tar -xf -
+  )
+
+  rm -f "${manifest_path}"
+  trap - RETURN
+}
+
+bootstrap_from_template_repo() {
+  local new_command_name="$1"
+  local parent_dir
+  local target_dir
+
+  require_command gh
+  require_command tar
+
+  parent_dir="$(dirname "${root_dir}")"
+  target_dir="${parent_dir}/${new_command_name}"
+
+  if [[ -e "${target_dir}" ]]; then
+    echo "Destination already exists: ${target_dir}" >&2
+    exit 1
+  fi
+
+  (
+    cd "${parent_dir}"
+    gh repo create "${new_command_name}" --public --clone
+  )
+
+  if [[ ! -d "${target_dir}" ]]; then
+    echo "gh repo create did not create ${target_dir}." >&2
+    exit 1
+  fi
+
+  copy_template_repo "${root_dir}" "${target_dir}"
+
+  exec "${target_dir}/scripts/newcmd"
+}
+
 cd "${root_dir}"
 
 repo_name="$(basename "${root_dir}")"
+validate_command_name "${repo_name}"
 
-if [[ -z "${repo_name}" ]]; then
-  echo "Could not derive a command name from the repository basename." >&2
-  exit 1
-fi
+if [[ "${repo_name}" == "${old_name}" ]]; then
+  read -r -p 'New command name: ' repo_name
 
-if [[ ! "${repo_name}" =~ ^[a-z][a-z0-9-]*$ ]]; then
-  echo "Derived command name '${repo_name}' contains unsupported characters." >&2
-  exit 1
+  if [[ "${repo_name}" == "${old_name}" ]]; then
+    echo "New command name must differ from ${old_name}." >&2
+    exit 1
+  fi
+
+  validate_command_name "${repo_name}"
+  bootstrap_from_template_repo "${repo_name}"
 fi
 
 origin_url="$(git remote get-url origin 2>/dev/null || true)"
@@ -166,18 +244,19 @@ validate_output() {
   local matches
 
   matches="$(
-    git ls-files | while IFS= read -r tracked_path; do
-      case "${tracked_path}" in
-        goal.md|develop_*.md|implement_plan.md|iterate_*.md|plan*.md|requirements*.md|scripts/newcmd)
-          continue
-          ;;
-      esac
-      printf '%s\0' "${tracked_path}"
-    done | xargs -0 rg -n --fixed-strings "${old_name}" 2>/dev/null || true
+    rg -n --fixed-strings --hidden \
+      --glob '!goal.md' \
+      --glob '!develop_*.md' \
+      --glob '!implement_plan.md' \
+      --glob '!iterate_*.md' \
+      --glob '!plan*.md' \
+      --glob '!requirements*.md' \
+      --glob '!scripts/newcmd' \
+      "${old_name}" . 2>/dev/null || true
   )"
 
   if [[ -n "${matches}" ]]; then
-    echo "Rename completed, but the old skeleton name still appears in tracked files:" >&2
+    echo "Rename completed, but the old skeleton name still appears in repository files:" >&2
     echo "${matches}" >&2
     exit 1
   fi
@@ -186,7 +265,7 @@ validate_output() {
 validate_output
 
 if [[ "${NEWCMD_TEST_HARNESS:-}" != '1' ]]; then
-  read -r -p 'Remove scripts/newcmd and its dedicated tests from this cloned repo? [Y/n] ' cleanup_reply
+  read -r -p 'Remove scripts/newcmd and its dedicated tests from the new repo? [Y/n] ' cleanup_reply
 
   case "${cleanup_reply:-Y}" in
     Y|y|yes|YES|'')

@@ -1,5 +1,15 @@
 import { execFile, spawn } from 'node:child_process';
-import { cp, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import {
+  chmod,
+  cp,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  writeFile
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +28,51 @@ describe('scripts/newcmd', () => {
     while (tempDirs.length > 0) {
       await rm(tempDirs.pop(), { force: true, recursive: true });
     }
+  });
+
+  it('can bootstrap a new repo from the base skeleton with gh and tar before rebranding it', async () => {
+    const sourceDir = await createFixtureRepo(
+      'node-cmd-skel',
+      'git@github.com:djnz00/node-cmd-skel.git'
+    );
+    const { binDir, ghLogPath, tarLogPath } = await createBootstrapWrappers(path.dirname(sourceDir));
+    const input = 'ship-it\nacme/tools\n';
+
+    await runScript('./scripts/newcmd', [], {
+      cwd: sourceDir,
+      env: {
+        ...process.env,
+        NEWCMD_TEST_GH_LOG: ghLogPath,
+        NEWCMD_TEST_GH_OWNER: 'acme',
+        NEWCMD_TEST_HARNESS: '1',
+        NEWCMD_TEST_TAR_LOG: tarLogPath,
+        PATH: `${binDir}:${process.env.PATH}`
+      },
+      input
+    });
+
+    const repoDir = path.join(path.dirname(sourceDir), 'ship-it');
+
+    expect(await readFile(path.join(sourceDir, 'package.json'), 'utf8')).toContain(
+      '"name": "node-cmd-skel"'
+    );
+    expect(await readFile(path.join(repoDir, 'package.json'), 'utf8')).toContain('"name": "ship-it"');
+    expect(await readFile(path.join(repoDir, 'README.md'), 'utf8')).toContain(
+      'https://github.com/acme/ship-it'
+    );
+    expect(await readFile(path.join(repoDir, 'docs', 'distribution.md'), 'utf8')).toContain(
+      'acme/homebrew-tools'
+    );
+    await expect(stat(path.join(repoDir, 'ship-it'))).resolves.toBeDefined();
+
+    expect(await readFile(ghLogPath, 'utf8')).toContain('repo create ship-it --public --clone');
+
+    const tarLog = await readFile(tarLogPath, 'utf8');
+    expect(tarLog).toContain('-cf - -T');
+    expect(tarLog).toContain('-xf -');
+
+    const oldNameMatches = await trackedNameMatches(repoDir, 'node-cmd-skel');
+    expect(oldNameMatches).toBe('');
   });
 
   it('rewrites command, repo, and tap names while keeping dedicated tests under the harness', async () => {
@@ -82,7 +137,7 @@ async function createFixtureRepo(repoName, originUrl) {
   await cp(rootDir, repoDir, {
     filter(source) {
       const basename = path.basename(source);
-      return !['.git', 'dist', 'node_modules', 'releases'].includes(basename);
+      return !['.codex', '.git', 'dist', 'node_modules'].includes(basename);
     },
     recursive: true
   });
@@ -99,24 +154,7 @@ async function trackedNameMatches(repoDir, name) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const { stdout } = await execFile_('git', ['ls-files'], { cwd: repoDir });
-  const trackedPaths = (
-    await Promise.all(
-      stdout
-        .split(/\r?\n/)
-        .filter(Boolean)
-        .filter((filePath) => !exemptPaths.includes(filePath))
-        .map(async (filePath) => {
-          try {
-            await stat(path.join(repoDir, filePath));
-            return filePath;
-          } catch {
-            return null;
-          }
-        })
-    )
-  )
-    .filter(Boolean);
+  const trackedPaths = (await listRepoFiles(repoDir)).filter((filePath) => !exemptPaths.includes(filePath));
 
   if (trackedPaths.length === 0)
     return '';
@@ -134,6 +172,84 @@ async function trackedNameMatches(repoDir, name) {
   }
 
   return matches.join('\n');
+}
+
+async function listRepoFiles(repoDir, relativeDir = '') {
+  const directoryPath = path.join(repoDir, relativeDir);
+  const entries = await readdir(directoryPath, { withFileTypes: true });
+  const filePaths = [];
+
+  for (const entry of entries) {
+    const relativePath = relativeDir ? path.join(relativeDir, entry.name) : entry.name;
+
+    if (entry.isDirectory()) {
+      if (['.git', 'coverage', 'dist', 'node_modules'].includes(entry.name))
+        continue;
+
+      filePaths.push(...(await listRepoFiles(repoDir, relativePath)));
+      continue;
+    }
+
+    filePaths.push(relativePath);
+  }
+
+  return filePaths;
+}
+
+async function createBootstrapWrappers(parentDir) {
+  const binDir = path.join(parentDir, 'test-bin');
+  const ghLogPath = path.join(parentDir, 'gh.log');
+  const tarLogPath = path.join(parentDir, 'tar.log');
+  const realTarPath = await commandPath('tar');
+
+  await mkdir(binDir, { recursive: true });
+  await writeFile(
+    path.join(binDir, 'gh'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\\n' "$*" >> "${ghLogPath}"
+
+if [[ "\${1:-}" != 'repo' || "\${2:-}" != 'create' ]]; then
+  echo "unexpected gh invocation: $*" >&2
+  exit 1
+fi
+
+repo_input="\${3:-}"
+repo_name="\${repo_input##*/}"
+repo_owner="\${repo_input%%/*}"
+
+if [[ "\${repo_owner}" == "\${repo_input}" ]]; then
+  repo_owner="\${NEWCMD_TEST_GH_OWNER:-test-user}"
+fi
+
+repo_dir="\${PWD}/\${repo_name}"
+
+git init -b main "\${repo_dir}" >/dev/null
+git -C "\${repo_dir}" remote add origin "git@github.com:\${repo_owner}/\${repo_name}.git"
+`,
+    'utf8'
+  );
+  await writeFile(
+    path.join(binDir, 'tar'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+
+printf '%s\\n' "$*" >> "${tarLogPath}"
+exec "${realTarPath}" "$@"
+`,
+    'utf8'
+  );
+
+  await chmod(path.join(binDir, 'gh'), 0o755);
+  await chmod(path.join(binDir, 'tar'), 0o755);
+
+  return { binDir, ghLogPath, tarLogPath };
+}
+
+async function commandPath(commandName) {
+  const { stdout } = await execFile_('bash', ['-lc', `command -v ${commandName}`]);
+  return stdout.trim();
 }
 
 function runScript(command, args, { cwd, env, input }) {
